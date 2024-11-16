@@ -1,1 +1,2 @@
 The pretrain can download from https://huggingface.co/facebook/wav2vec2-base-960h
+And place the model under this path.
