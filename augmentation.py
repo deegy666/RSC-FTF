@@ -12,73 +12,66 @@ __all__ = ['VTLP_Patch', 'SpecAugment']
 
 
 def VTLP_Patch(sample, sample_rate, args):
-    """
-    Raw audio data augmentation technique
-    you can utilize any library code
-    1) nlpaug
-    2) audiomentations
-    3) librosa
-    """
 
-    """ 1) nlpaug """
-    augment_list = [
-        # naa.CropAug(sampling_rate=sample_rate)
-        naa.NoiseAug(), # apply noise injection operation
-        naa.SpeedAug(), # apply speed adjustment operation
-        naa.LoudnessAug(factor=(0.5, 2)), # apply adjusting loudness operation
-        naa.VtlpAug(sampling_rate=sample_rate, zone=(0.0, 1.0)), # apply vocal tract length perturbation (VTLP) operation
-        naa.PitchAug(sampling_rate=sample_rate, factor=(-1,3)) # apply pitch adjustment operation
-    ]
-
-    # randomly sample augmentation
-    aug_idx = random.randint(0, len(augment_list)-1)
-    sample = augment_list[aug_idx].augment(sample)
-
-    # apply all augmentations
-    # for aug_idx in range(len(augment_list)):
-    #     sample = augment_list[aug_idx].augment(sample)
+    """Vocal Tract Length Perturbation Patch Augmentation"""
     
-    """ 2) audiomentations """
-    # import audiomentations
-    # from audiomentations import AddGaussianSNR, TimeStretch, PitchShift, Shift
+   
+    alpha = np.random.uniform(*alpha_range)
+    gain = np.random.uniform(*gain_range)
+    
+    
+    n_fft = 512
+    hop_length = int(sr * 0.015)  # 15ms帧移
+    win_length = int(sr * 0.030)  # 30ms帧长
+    
+    
+    D = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+    magnitude, phase = librosa.magphase(D)
+    n_freq, n_time = magnitude.shape
+    
+    
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    
+    
+    L = np.zeros_like(freqs)
+    boundary = F_hi * min(alpha, 1) / alpha
+    for i, f in enumerate(freqs):
+        if f <= boundary:
+            L[i] = f * alpha
+        else:
+            numerator = sr/2 - F_hi * min(alpha, 1)/alpha
+            L[i] = (sr/2 - numerator/(sr/2 - boundary) * (sr/2 - f))
+    
+    
+    warped_magnitude = np.zeros_like(magnitude)
+    for i in range(n_freq):
+        idx = np.abs(freqs - L[i]).argmin()
+        warped_magnitude[i] = magnitude[idx]
+    
+    
+    modified_D = warped_magnitude * phase
+    audio_modified = librosa.istft(modified_D, hop_length=hop_length, win_length=win_length)
+    
+    
+    audio_modified *= gain
+    
+    
+    noise = np.random.normal(0, noise_scale, len(audio_modified))
+    audio_modified += noise
+    
+    
+    if len(audio_modified) > len(audio):
+        audio_modified = audio_modified[:len(audio)]
+    elif len(audio_modified) < len(audio):
+        pad_len = len(audio) - len(audio_modified)
+        audio_modified = np.pad(audio_modified, (0, pad_len), mode='wrap')
+    
+    
+    audio_modified = librosa.util.normalize(audio_modified)
+    
+    return audio_modified
 
-    # # when using audiomentations library (not DEBUG yet)
-    # audio_transforms = audiomentations.Compose([
-    #     AddGaussianSNR(min_snr_in_db=5, max_snr_in_db=40.0, p=0.5),
-    #     TimeStretch(min_rate=0.8, max_rate=1.25, p=0.5),
-    #     PitchShift(min_semitones=-4, max_semitones=4, p=0.5),
-    #     Shift(min_fraction=-0.5, max_fraction=0.5, p=0.5),
-    # ])
 
-    # sample = audio_transforms(samples=sample, sample_rate=sample_rate)
-
-    """ 3) librosa """
-    # import librosa
-
-    # def _noise(data):
-    #     noise_amp = 0.035 * np.random.uniform() * np.amax(data)
-    #     data = data + noise_amp * np.random.normal(size=data.shape[0])
-    #     return data
-
-    # def _stretch(data, rate=0.8):
-    #     return librosa.effects.time_stretch(data, rate)
-
-    # def _shift(data):
-    #     shift_range = int(np.random.uniform(low=-5, high=5) * 1000)
-    #     return np.roll(data, shift_range)
-        
-    # def _pitch(data, sampling_rate, pitch_factor=0.7):
-    #     return librosa.effects.pitch_shift(data, sampling_rate, pitch_factor)
-
-    # sample = _noise(sample)
-    # sample = _stretch(sample)
-    # sample = _shift(sample)
-    # sample = _pitch(sample, sample_rate)
-
-    if type(sample) == list:
-        return sample[0]
-    else:
-        return sample
 
 
 # Use this Class when you load dataset with librosa
